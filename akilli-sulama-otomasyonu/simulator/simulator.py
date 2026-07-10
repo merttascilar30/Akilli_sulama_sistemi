@@ -6,14 +6,14 @@ import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
-URL = "http://localhost:8081/api/metrics/sync"
-STATION_ID = str(uuid.uuid4())
+URL = "http://localhost:8081/api/metrics/async"
+STATION_ID = "2d28ec28-e903-43b8-85fa-d472259eba64"
 TARGET_RPS = 200
 WORKER_COUNT = 20
 
 def generate_and_send():
     payload = {
-        "istasyon_id": STATION_ID,
+        "istasyonId": STATION_ID,
         "nem": round(random.uniform(10.0, 50.0), 2),
         "sicaklik": round(random.uniform(15.0, 45.0), 2)
     }
