@@ -3,20 +3,18 @@ package com.example.backend.service;
 import com.example.backend.dto.KuralMotoruIstekDto;
 import com.example.backend.dto.SensorMetrikRequestDto;
 import com.example.backend.entity.Istasyon;
+import com.example.backend.entity.SensorMetrik;
 import com.example.backend.repository.IstasyonRepository;
+import com.example.backend.repository.SensorMetrikRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.BatchPreparedStatementSetter;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,8 +23,9 @@ import java.util.UUID;
 
 /**
  * Arka planda her 250 ms'de bir calisan zamanlanmis gorev.
- * Kuyruktaki sensor verilerini bosaltip JdbcTemplate ile tek seferde
- * (batch insert) PostgreSQL'e gomer. Ardindan her istasyon icin en son
+ * Kuyruktaki sensor verilerini bosaltip sensorMetrikRepository.saveAll ile
+ * tek seferde veritabanina yazar, ardindan her kaydi /topic/live-metrics
+ * kanaligina anlik olarak yayinlar. Son olarak her istasyon icin en son
  * olcumu Python Kural Motoru servisine gonderip sulama karari alir.
  */
 @Component
@@ -34,15 +33,14 @@ import java.util.UUID;
 public class SensorMetrikTopluYaziciGorevi {
 
     private static final Logger log = LoggerFactory.getLogger(SensorMetrikTopluYaziciGorevi.class);
-
-    private static final String TOPLU_EKLEME_SORGUSU =
-            "INSERT INTO sensor_metrikleri (istasyon_id, nem, sicaklik, kayit_tarihi) VALUES (?, ?, ?, ?)";
+    private static final String CANLI_METRIK_KANALI = "/topic/live-metrics";
 
     private final SensorMetrikKuyrugu sensorMetrikKuyrugu;
-    private final JdbcTemplate jdbcTemplate;
+    private final SensorMetrikRepository sensorMetrikRepository;
     private final IstasyonRepository istasyonRepository;
     private final KuralMotoruClient kuralMotoruClient;
     private final OtonomVanaTetikleyici otonomVanaTetikleyici;
+    private final SimpMessagingTemplate simpMessagingTemplate;
 
     @Value("${kural-motoru.et0-varsayilan}")
     private BigDecimal et0VarsayilanDegeri;
@@ -54,25 +52,23 @@ public class SensorMetrikTopluYaziciGorevi {
             return;
         }
 
-        jdbcTemplate.batchUpdate(TOPLU_EKLEME_SORGUSU, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement ps, int i) throws SQLException {
-                SensorMetrikRequestDto veri = yazilacakVeriler.get(i);
-                ps.setObject(1, veri.getIstasyonId());
-                ps.setBigDecimal(2, veri.getNem());
-                ps.setBigDecimal(3, veri.getSicaklik());
-                ps.setTimestamp(4, Timestamp.from(OffsetDateTime.now().toInstant()));
-            }
+        List<SensorMetrik> kaydedilenMetrikler = sensorMetrikRepository.saveAll(
+                yazilacakVeriler.stream().map(this::dtoDenEntityUret).toList());
 
-            @Override
-            public int getBatchSize() {
-                return yazilacakVeriler.size();
-            }
-        });
+        log.info("{} adet sensor verisi toplu olarak veritabanina yazildi.", kaydedilenMetrikler.size());
 
-        log.info("{} adet sensor verisi toplu olarak veritabanina yazildi.", yazilacakVeriler.size());
+        kaydedilenMetrikler.forEach(metrik -> simpMessagingTemplate.convertAndSend(CANLI_METRIK_KANALI, metrik));
 
         kuralMotorunuTetikle(yazilacakVeriler);
+    }
+
+    private SensorMetrik dtoDenEntityUret(SensorMetrikRequestDto veri) {
+        return SensorMetrik.builder()
+                .istasyonId(veri.getIstasyonId())
+                .nem(veri.getNem())
+                .sicaklik(veri.getSicaklik())
+                .kayitTarihi(OffsetDateTime.now())
+                .build();
     }
 
     private void kuralMotorunuTetikle(List<SensorMetrikRequestDto> veriler) {

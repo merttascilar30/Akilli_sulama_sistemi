@@ -9,6 +9,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.UUID;
 
@@ -21,6 +22,9 @@ public class OtonomVanaTetikleyiciTest {
     @Mock
     private VanaLogRepository vanaLogRepository;
 
+    @Mock
+    private SimpMessagingTemplate simpMessagingTemplate;
+
     @InjectMocks
     private OtonomVanaTetikleyici otonomVanaTetikleyici;
 
@@ -30,6 +34,7 @@ public class OtonomVanaTetikleyiciTest {
         UUID testIstasyonId = UUID.randomUUID();
         KuralMotoruYanitDto mockResponse = new KuralMotoruYanitDto();
         mockResponse.setSulamaGerekli(true);
+        when(vanaLogRepository.save(any(VanaLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // When: Tetikleyici servis çalıştırılıyor
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, mockResponse);
@@ -43,6 +48,9 @@ public class OtonomVanaTetikleyiciTest {
         assertEquals(1, savedLog.getDurum());
         assertEquals("OTONOM", savedLog.getTetiklemeTipi());
         assertNotNull(savedLog.getTarih());
+
+        // Then: Kaydedilen log /topic/vana-loglari kanaligina yayinlanmali
+        verify(simpMessagingTemplate, times(1)).convertAndSend("/topic/vana-loglari", savedLog);
     }
 
     @Test
@@ -55,7 +63,8 @@ public class OtonomVanaTetikleyiciTest {
         // When: Tetikleyici servis çalıştırılıyor
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, mockResponse);
 
-        // Then: Veri tabanına hiçbir kayıt atılmamalı
+        // Then: Veri tabanına hiçbir kayıt atılmamalı ve yayin yapilmamali
         verify(vanaLogRepository, never()).save(any(VanaLog.class));
+        verify(simpMessagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
     }
 }
