@@ -21,7 +21,8 @@ public class IstasyonResponseDto {
 
     private UUID id;
     private String ad;
-    private String koordinat;
+    private Double enlem;
+    private Double boylam;
     private BigDecimal tarlaKapasitesi;
     private BigDecimal solmaNoktasi;
     private BigDecimal bitkiKatsayisi;

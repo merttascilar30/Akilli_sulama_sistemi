@@ -21,7 +21,9 @@ public class IstasyonRequestDto {
     @NotBlank(message = "Istasyon adi bos olamaz")
     private String ad;
 
-    private String koordinat;
+    private Double enlem;
+
+    private Double boylam;
 
     @NotNull(message = "Tarla kapasitesi zorunludur")
     private BigDecimal tarlaKapasitesi;

@@ -3,7 +3,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE istasyonlar (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     ad VARCHAR(100) NOT NULL,
-    koordinat VARCHAR(100),
+    enlem DOUBLE PRECISION,
+    boylam DOUBLE PRECISION,
     tarla_kapasitesi DECIMAL(5,2),
     solma_noktasi DECIMAL(5,2),
     bitki_katsayisi DECIMAL(3,2)

@@ -7,6 +7,19 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        /* Haritayı panelin karanlık temasına (Dark Mode) uyumlu hale getiren filtre */
+        .dark-map .leaflet-layer,
+        .dark-map .leaflet-control-zoom-in,
+        .dark-map .leaflet-control-zoom-out,
+        .dark-map .leaflet-control-attribution {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+        }
+        #map { z-index: 10; }
+    </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
 
@@ -21,150 +34,228 @@
         </div>
     </header>
 
-    <main class="container mx-auto px-4 py-8 space-y-8">
+    <main class="container mx-auto px-4 py-8 space-y-6">
 
         <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md hover:border-emerald-500 transition duration-300">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md">
                 <div class="flex justify-between items-center text-slate-400 mb-2">
-                    <span class="text-sm font-semibold">Toprak Nemi</span>
-                    <span class="text-2xl">💧</span>
+                    <span class="text-sm font-semibold">Toprak Nemi</span><span class="text-2xl">💧</span>
                 </div>
                 <div class="flex items-baseline space-x-1">
-                    <span id="toprak-nemi" class="text-3xl font-extrabold text-emerald-400">--</span>
-                    <span class="text-lg text-slate-400">%</span>
+                    <span id="toprak-nemi" class="text-3xl font-extrabold text-emerald-400">--</span><span class="text-lg text-slate-400">%</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-2">Hedef Nem Eşiği: ~%31.7</p>
             </div>
 
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md hover:border-amber-500 transition duration-300">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md">
                 <div class="flex justify-between items-center text-slate-400 mb-2">
-                    <span class="text-sm font-semibold">Hava Sıcaklığı</span>
-                    <span class="text-2xl">🌡️</span>
+                    <span class="text-sm font-semibold">Hava Sıcaklığı</span><span class="text-2xl">🌡️</span>
                 </div>
                 <div class="flex items-baseline space-x-1">
-                    <span id="sicaklik" class="text-3xl font-extrabold text-amber-400">--</span>
-                    <span class="text-lg text-slate-400">°C</span>
+                    <span id="sicaklik" class="text-3xl font-extrabold text-amber-400">--</span><span class="text-lg text-slate-400">°C</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-2">Ortam Sıcaklık Verisi</p>
             </div>
 
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md hover:border-sky-500 transition duration-300">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md">
                 <div class="flex justify-between items-center text-slate-400 mb-2">
-                    <span class="text-sm font-semibold">Hava Nemi</span>
-                    <span class="text-2xl">☁️</span>
+                    <span class="text-sm font-semibold">Hava Nemi</span><span class="text-2xl">☁️</span>
                 </div>
                 <div class="flex items-baseline space-x-1">
-                    <span id="hava-nemi" class="text-3xl font-extrabold text-sky-400">--</span>
-                    <span class="text-lg text-slate-400">%</span>
+                    <span id="hava-nemi" class="text-3xl font-extrabold text-sky-400">--</span><span class="text-lg text-slate-400">%</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-2">Nisbi Nem Değeri</p>
             </div>
 
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md hover:border-indigo-500 transition duration-300">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md">
                 <div class="flex justify-between items-center text-slate-400 mb-2">
-                    <span class="text-sm font-semibold">Depo Su Seviyesi</span>
-                    <span class="text-2xl">🪣</span>
+                    <span class="text-sm font-semibold">Depo Su Seviyesi</span><span class="text-2xl">🪣</span>
                 </div>
                 <div class="flex items-baseline space-x-1">
-                    <span id="su-seviyesi" class="text-3xl font-extrabold text-indigo-400">--</span>
-                    <span class="text-lg text-slate-400">%</span>
+                    <span id="su-seviyesi" class="text-3xl font-extrabold text-indigo-400">--</span><span class="text-lg text-slate-400">%</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-2">Kritik Sınır: %15</p>
             </div>
-
         </section>
 
-        <section class="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-md">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-bold text-slate-200 flex items-center space-x-2">
-                    <span>⚡</span>
-                    <span>Otonom Vana Kararları ve Canlı Akış Logları</span>
-                </h2>
-                <span class="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-mono">Real-Time WebSocket Stream</span>
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-md flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-slate-200 flex items-center space-x-2">
+                        <span>🗺️</span><span>Canlı İstasyon Haritası (GIS)</span>
+                    </h2>
+                </div>
+                <div id="map" class="w-full flex-grow rounded-lg border border-slate-600 dark-map" style="min-height: 350px;"></div>
             </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-sm text-slate-300">
-                    <thead class="bg-slate-900/60 text-slate-400 uppercase text-xs">
-                        <tr>
-                            <th class="py-3 px-4">Zaman</th>
-                            <th class="py-3 px-4">İstasyon ID</th>
-                            <th class="py-3 px-4">Vana Durumu</th>
-                            <th class="py-3 px-4">Tetikleme Tipi</th>
-                        </tr>
-                    </thead>
-                    <tbody id="vana-loglari-body" class="divide-y divide-slate-700/50">
-                        <tr id="empty-row">
-                            <td colspan="4" class="py-6 text-center text-slate-500 italic">
-                                Henüz canlı vana hareketi algılanmadı. WebSocket yayın kanalı dinleniyor...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-md flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-slate-200 flex items-center space-x-2">
+                        <span>⚡</span><span>Vana Kararları ve Log Akışı</span>
+                    </h2>
+                </div>
+                <div class="overflow-x-auto flex-grow max-h-[350px]">
+                    <table class="w-full text-left text-sm text-slate-300">
+                        <thead class="bg-slate-900/60 text-slate-400 uppercase text-xs sticky top-0 z-20">
+                            <tr>
+                                <th class="py-3 px-4">Zaman</th>
+                                <th class="py-3 px-4">İstasyon</th>
+                                <th class="py-3 px-4">Vana Durumu</th>
+                                <th class="py-3 px-4">Tetikleme Tipi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vana-loglari-body" class="divide-y divide-slate-700/50">
+                            <tr id="empty-row">
+                                <td colspan="4" class="py-6 text-center text-slate-500 italic">
+                                    Henüz canlı vana hareketi algılanmadı.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+
         </section>
 
     </main>
 
     <script>
         let stompClient = null;
+        let map = null;
+        let stationMarkers = {}; // YENİ: Çoklu istasyonları tutacak obje
+        let seciliIstasyonId = null; // Üstteki sensör kartlarının hangi istasyona ait olduğunu belirler
+
+        // Harita Başlatma Fonksiyonu
+        function initMap() {
+            // Harita merkezini Adana'ya odakla
+            map = L.map('map').setView([36.9850, 35.3250], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 18
+            }).addTo(map);
+            
+            // Not: Başlangıç pini buradan silindi. Artık veriler geldikçe pinler dinamik oluşacak.
+        }
+
+        // YENİ: Haritadaki İstasyon Rengini ve Bilgisini Güncelleyen (veya Yeni Ekleyen) Fonksiyon
+        function addOrUpdateMarker(istasyonId, enlem, boylam, vanaDurumu, nem) {
+            if (!stationMarkers[istasyonId]) {
+                // İstasyon haritada YOKSA, yeni bir pin (nokta) oluştur
+                let pinColor = (vanaDurumu === 1) ? "#10b981" : "#3b82f6"; 
+                
+                let yeniMarker = L.circleMarker([enlem, boylam], {
+                    radius: 14,
+                    fillColor: pinColor,
+                    color: "#ffffff",
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                }).addTo(map);
+
+                yeniMarker.bindPopup(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: Başlatılıyor...`);
+
+                // Pine tıklandığında üstteki sensör kartları bu istasyona odaklansın
+                yeniMarker.on('click', function () {
+                    seciliIstasyonId = istasyonId;
+                });
+
+                // Sayfa ilk açıldığında bağlanan ilk istasyon otomatik seçili gelsin
+                if (seciliIstasyonId === null) {
+                    seciliIstasyonId = istasyonId;
+                }
+
+                // Popup metnini canlı nem verisiyle güncelleyebilmek için son vana durumunu pin üzerinde tutuyoruz
+                yeniMarker.sonVanaDurumu = vanaDurumu;
+
+                // Objeye kaydet
+                stationMarkers[istasyonId] = yeniMarker;
+            } else {
+                // İstasyon ZATEN VARSA, sadece rengini ve içeriğini güncelle
+                let mevcutMarker = stationMarkers[istasyonId];
+                mevcutMarker.sonVanaDurumu = vanaDurumu;
+
+                if (vanaDurumu === 1) {
+                    mevcutMarker.setStyle({ fillColor: "#10b981" });
+                    mevcutMarker.setPopupContent(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: 🟢 SULANIYOR<br/>Son Nem: %${nem}`);
+                } else {
+                    mevcutMarker.setStyle({ fillColor: "#3b82f6" });
+                    mevcutMarker.setPopupContent(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: 🔵 BEKLEMEDE<br/>Son Nem: %${nem}`);
+                }
+            }
+        }
+
+        // YENİ: Canlı metrik geldiğinde ilgili pinin popup'ındaki "Son Nem" yazısını güncelleyen fonksiyon
+        function updateMarkerNemPopup(istasyonId, nem) {
+            const marker = stationMarkers[istasyonId];
+            if (!marker || nem === undefined || nem === null) {
+                return;
+            }
+
+            const durumMetni = marker.sonVanaDurumu === 1 ? '🟢 SULANIYOR' : '🔵 BEKLEMEDE';
+            marker.setPopupContent(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: ${durumMetni}<br/>Son Nem: %${parseFloat(nem).toFixed(1)}`);
+        }
 
         function connectWebSocket() {
-            // Spring Boot backend sunucumuzun SockJS endpoint'i
             const socket = new SockJS('http://localhost:8081/ws');
             stompClient = Stomp.over(socket);
-
-            // Konsol debug loglarını kapatıp temiz tutmak için
             stompClient.debug = null;
 
             stompClient.connect({}, function (frame) {
-                // Bağlantı Başarılı UI Güncellemesi
                 document.getElementById('connection-status-dot').className = 'w-3 h-3 rounded-full bg-emerald-500 animate-pulse';
                 document.getElementById('connection-status-text').innerText = 'WebSocket Canlı Bağlandı';
                 document.getElementById('connection-status-text').className = 'text-sm text-emerald-400 font-medium';
 
-                // 1. Canlı Sensör Metrikleri Kanalına Abone Ol
+                let sonNemDegeri = "--";
+
                 stompClient.subscribe('/topic/live-metrics', function (message) {
                     const metrik = JSON.parse(message.body);
-                    updateSensorCard(metrik);
+                    const gelenNem = metrik.nem !== undefined ? metrik.nem : metrik.toprakNemi;
+
+                    // Sayfa ilk açıldığında bağlanan ilk istasyon otomatik seçili gelsin
+                    if (seciliIstasyonId === null) {
+                        seciliIstasyonId = metrik.istasyonId;
+                    }
+
+                    if (metrik.istasyonId === seciliIstasyonId) {
+                        sonNemDegeri = gelenNem;
+                        updateSensorCard(metrik);
+                    }
+
+                    // Pin'in popup'ındaki "Son Nem" bilgisi vana durumundan bağımsız olarak her canlı veride tazelenir
+                    updateMarkerNemPopup(metrik.istasyonId, gelenNem);
                 });
 
-                // 2. Canlı Otonom Vana Logları Kanalına Abone Ol
                 stompClient.subscribe('/topic/vana-loglari', function (message) {
                     const vanaLog = JSON.parse(message.body);
                     addVanaLogRow(vanaLog);
+                    
+                    // YENİ DEĞİŞİKLİK: Vana kararı gelince haritadaki pini dinamik fonksiyona yolla.
+                    // Eğer Backend'den koordinat gelmiyorsa (şimdilik) varsayılan Adana koordinatını ve 'istasyon-1' id'sini atıyoruz.
+                    // İleride backend'den vanaLog.enlem ve vanaLog.boylam verileri geldikçe buralar otomatik dolacak.
+                    let lat = vanaLog.enlem || 36.9850;
+                    let lng = vanaLog.boylam || 35.3250;
+                    let id = vanaLog.istasyon_id || vanaLog.istasyonId || 'istasyon-1';
+                    
+                    addOrUpdateMarker(id, lat, lng, vanaLog.durum, sonNemDegeri);
                 });
 
             }, function (error) {
-                // Bağlantı Kopması veya Hata Durumu
                 document.getElementById('connection-status-dot').className = 'w-3 h-3 rounded-full bg-red-500 animate-pulse';
                 document.getElementById('connection-status-text').innerText = 'Bağlantı Kesildi (Yeniden Deneniyor...)';
                 document.getElementById('connection-status-text').className = 'text-sm text-red-400 font-medium';
-                
-                // 5 saniye sonra tekrar bağlanmayı dene
                 setTimeout(connectWebSocket, 5000);
             });
         }
 
-        // Sensör Kartlarını Dinamik Güncelleyen Fonksiyon
         function updateSensorCard(metrik) {
             const nemVal = metrik.toprakNemi !== undefined ? metrik.toprakNemi : metrik.nem;
-            if (nemVal !== undefined) {
-                document.getElementById('toprak-nemi').innerText = parseFloat(nemVal).toFixed(1);
-            }
-            if (metrik.sicaklik !== undefined) {
-                document.getElementById('sicaklik').innerText = parseFloat(metrik.sicaklik).toFixed(1);
-            }
-            if (metrik.havaNemi !== undefined) {
-                document.getElementById('hava-nemi').innerText = parseFloat(metrik.havaNemi).toFixed(1);
-            }
-            if (metrik.suSeviyesi !== undefined) {
-                document.getElementById('su-seviyesi').innerText = parseFloat(metrik.suSeviyesi).toFixed(1);
-            }
+            if (nemVal !== undefined) document.getElementById('toprak-nemi').innerText = parseFloat(nemVal).toFixed(1);
+            if (metrik.sicaklik !== undefined) document.getElementById('sicaklik').innerText = parseFloat(metrik.sicaklik).toFixed(1);
+            if (metrik.havaNemi !== undefined) document.getElementById('hava-nemi').innerText = parseFloat(metrik.havaNemi).toFixed(1);
+            if (metrik.suSeviyesi !== undefined) document.getElementById('su-seviyesi').innerText = parseFloat(metrik.suSeviyesi).toFixed(1);
         }
 
-        // Otonom Vana Logunu Tabloya Ekleme Fonksiyonu
         function addVanaLogRow(vanaLog) {
             const tableBody = document.getElementById('vana-loglari-body');
             const emptyRow = document.getElementById('empty-row');
@@ -174,28 +265,26 @@
             newRow.className = 'hover:bg-slate-700/30 transition duration-200';
 
             const formattedDate = vanaLog.tarih ? new Date(vanaLog.tarih).toLocaleTimeString() : new Date().toLocaleTimeString();
+            const istasyonKisaId = vanaLog.istasyonId ? vanaLog.istasyonId.substring(0, 8) : '--------';
             const durumBadge = vanaLog.durum === 1 
                 ? '<span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded text-xs font-semibold">AÇIK (Sulanıyor)</span>' 
-                : '<span class="bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2.5 py-0.5 rounded text-xs font-semibold">KAPALI</span>';
+                : '<span class="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2.5 py-0.5 rounded text-xs font-semibold">KAPALI</span>';
 
             newRow.innerHTML = `
                 <td class="py-3 px-4 font-mono text-slate-400">${formattedDate}</td>
-                <td class="py-3 px-4 font-mono text-xs text-slate-300">${vanaLog.istasyonId || 'N/A'}</td>
+                <td class="py-3 px-4 font-mono text-slate-400">${istasyonKisaId}...</td>
                 <td class="py-3 px-4">${durumBadge}</td>
                 <td class="py-3 px-4"><span class="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded text-xs">${vanaLog.tetiklemeTipi || 'OTONOM'}</span></td>
             `;
 
-            // En yeni logu tablonun en üstüne ekle
             tableBody.insertBefore(newRow, tableBody.firstChild);
-
-            // Tabloda en fazla 10 satır tut
-            if (tableBody.children.length > 10) {
-                tableBody.removeChild(tableBody.lastChild);
-            }
+            if (tableBody.children.length > 8) tableBody.removeChild(tableBody.lastChild);
         }
 
-        // Sayfa yüklendiğinde WebSocket bağlantısını başlat
-        window.onload = connectWebSocket;
+        window.onload = function() {
+            initMap(); // Önce haritayı yükle
+            connectWebSocket(); // Sonra canlı veriyi bağla
+        };
     </script>
 </body>
 </html>

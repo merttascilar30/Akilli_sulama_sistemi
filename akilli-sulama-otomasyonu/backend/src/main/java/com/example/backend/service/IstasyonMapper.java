@@ -14,7 +14,8 @@ public class IstasyonMapper {
     public Istasyon toEntity(IstasyonRequestDto dto) {
         return Istasyon.builder()
                 .ad(dto.getAd())
-                .koordinat(dto.getKoordinat())
+                .enlem(dto.getEnlem())
+                .boylam(dto.getBoylam())
                 .tarlaKapasitesi(dto.getTarlaKapasitesi())
                 .solmaNoktasi(dto.getSolmaNoktasi())
                 .bitkiKatsayisi(dto.getBitkiKatsayisi())
@@ -23,7 +24,8 @@ public class IstasyonMapper {
 
     public void updateEntityFromDto(IstasyonRequestDto dto, Istasyon entity) {
         entity.setAd(dto.getAd());
-        entity.setKoordinat(dto.getKoordinat());
+        entity.setEnlem(dto.getEnlem());
+        entity.setBoylam(dto.getBoylam());
         entity.setTarlaKapasitesi(dto.getTarlaKapasitesi());
         entity.setSolmaNoktasi(dto.getSolmaNoktasi());
         entity.setBitkiKatsayisi(dto.getBitkiKatsayisi());
@@ -33,7 +35,8 @@ public class IstasyonMapper {
         return IstasyonResponseDto.builder()
                 .id(entity.getId())
                 .ad(entity.getAd())
-                .koordinat(entity.getKoordinat())
+                .enlem(entity.getEnlem())
+                .boylam(entity.getBoylam())
                 .tarlaKapasitesi(entity.getTarlaKapasitesi())
                 .solmaNoktasi(entity.getSolmaNoktasi())
                 .bitkiKatsayisi(entity.getBitkiKatsayisi())

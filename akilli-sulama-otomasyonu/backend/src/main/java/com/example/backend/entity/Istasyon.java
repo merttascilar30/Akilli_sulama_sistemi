@@ -37,8 +37,11 @@ public class Istasyon {
     @Column(name = "ad", nullable = false, length = 100)
     private String ad;
 
-    @Column(name = "koordinat", length = 100)
-    private String koordinat;
+    @Column(name = "enlem")
+    private Double enlem;
+
+    @Column(name = "boylam")
+    private Double boylam;
 
     /**
      * Tarla kapasitesi (%): Topragin tutabilecegi maksimum nem orani.
