@@ -9,6 +9,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
         /* Haritayı panelin karanlık temasına (Dark Mode) uyumlu hale getiren filtre */
@@ -118,13 +119,103 @@
 
         </section>
 
+        <section class="grid grid-cols-1 gap-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-md flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-slate-200 flex items-center space-x-2">
+                        <span>📈</span><span>Canlı Toprak Nemi Trendi</span>
+                    </h2>
+                </div>
+                <div class="w-full" style="min-height: 300px;">
+                    <canvas id="nemGrafigi"></canvas>
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <script>
         let stompClient = null;
         let map = null;
         let stationMarkers = {}; // YENİ: Çoklu istasyonları tutacak obje
-        let seciliIstasyonId = null; // Üstteki sensör kartlarının hangi istasyona ait olduğunu belirler
+        let seciliIstasyonId = null; // Üstteki sensör kartlarının ve grafiğin hangi istasyona ait olduğunu belirler
+        let nemChart = null;
+        const MAKS_GRAFIK_NOKTASI = 20;
+
+        // Seçili istasyonu değiştirir; farklı bir istasyona geçildiğinde grafiği sıfırlar
+        function seciliIstasyonuAyarla(yeniIstasyonId) {
+            if (yeniIstasyonId === seciliIstasyonId) {
+                return;
+            }
+            seciliIstasyonId = yeniIstasyonId;
+            nemGrafiginiSifirla();
+        }
+
+        // Canlı Toprak Nemi Trendi grafiğini başlatan fonksiyon
+        function initNemGrafigi() {
+            const ctx = document.getElementById('nemGrafigi').getContext('2d');
+            nemChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Toprak Nemi (%)',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    animation: false,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Zaman', color: '#94a3b8' },
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Toprak Nemi (%)', color: '#94a3b8' },
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#e2e8f0' } }
+                    }
+                }
+            });
+        }
+
+        // Seçili istasyon değiştiğinde grafiği baştan başlatır
+        function nemGrafiginiSifirla() {
+            if (!nemChart) {
+                return;
+            }
+            nemChart.data.labels = [];
+            nemChart.data.datasets[0].data = [];
+            nemChart.update();
+        }
+
+        // Grafiğe yeni bir nem verisi ekler; son 20 veri paketini tutup en eskisini kaydırarak siler
+        function nemGrafiginiGuncelle(nem) {
+            if (!nemChart || nem === undefined || nem === null) {
+                return;
+            }
+
+            nemChart.data.labels.push(new Date().toLocaleTimeString());
+            nemChart.data.datasets[0].data.push(parseFloat(nem));
+
+            if (nemChart.data.labels.length > MAKS_GRAFIK_NOKTASI) {
+                nemChart.data.labels.shift();
+                nemChart.data.datasets[0].data.shift();
+            }
+
+            nemChart.update();
+        }
 
         // Harita Başlatma Fonksiyonu
         function initMap() {
@@ -155,14 +246,14 @@
 
                 yeniMarker.bindPopup(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: Başlatılıyor...`);
 
-                // Pine tıklandığında üstteki sensör kartları bu istasyona odaklansın
+                // Pine tıklandığında üstteki sensör kartları ve grafik bu istasyona odaklansın
                 yeniMarker.on('click', function () {
-                    seciliIstasyonId = istasyonId;
+                    seciliIstasyonuAyarla(istasyonId);
                 });
 
                 // Sayfa ilk açıldığında bağlanan ilk istasyon otomatik seçili gelsin
                 if (seciliIstasyonId === null) {
-                    seciliIstasyonId = istasyonId;
+                    seciliIstasyonuAyarla(istasyonId);
                 }
 
                 // Popup metnini canlı nem verisiyle güncelleyebilmek için son vana durumunu pin üzerinde tutuyoruz
@@ -214,12 +305,13 @@
 
                     // Sayfa ilk açıldığında bağlanan ilk istasyon otomatik seçili gelsin
                     if (seciliIstasyonId === null) {
-                        seciliIstasyonId = metrik.istasyonId;
+                        seciliIstasyonuAyarla(metrik.istasyonId);
                     }
 
                     if (metrik.istasyonId === seciliIstasyonId) {
                         sonNemDegeri = gelenNem;
                         updateSensorCard(metrik);
+                        nemGrafiginiGuncelle(gelenNem);
                     }
 
                     // Pin'in popup'ındaki "Son Nem" bilgisi vana durumundan bağımsız olarak her canlı veride tazelenir
@@ -283,6 +375,7 @@
 
         window.onload = function() {
             initMap(); // Önce haritayı yükle
+            initNemGrafigi(); // Nem trend grafiğini hazırla
             connectWebSocket(); // Sonra canlı veriyi bağla
         };
     </script>
