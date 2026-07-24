@@ -1,54 +1,47 @@
 package com.example.backend.service;
 
 import com.example.backend.dto.KuralMotoruYanitDto;
-import com.example.backend.dto.VanaLogYayinDto;
 import com.example.backend.entity.Istasyon;
-import com.example.backend.entity.VanaLog;
 import com.example.backend.repository.IstasyonRepository;
-import com.example.backend.repository.VanaLogRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 public class OtonomVanaTetikleyiciTest {
 
     @Mock
-    private VanaLogRepository vanaLogRepository;
-
-    @Mock
     private IstasyonRepository istasyonRepository;
 
     @Mock
-    private SimpMessagingTemplate simpMessagingTemplate;
+    private IstasyonKontrolModuServisi istasyonKontrolModuServisi;
+
+    @Mock
+    private VanaLogYayinci vanaLogYayinci;
 
     @InjectMocks
     private OtonomVanaTetikleyici otonomVanaTetikleyici;
 
     @Test
     public void testTetikle_VanaKapaliyken_SulamaGerekli_VanaAcilmali() {
-        // Given: İstasyon başlangıçta bilinen bir durumda değil (varsayılan KAPALI), kural motoru "sulama gerekli" diyor
+        // Given: İstasyon otonom modda, başlangıçta bilinen bir durumu yok (varsayılan KAPALI), kural motoru "sulama gerekli" diyor
         UUID testIstasyonId = UUID.randomUUID();
         KuralMotoruYanitDto mockResponse = new KuralMotoruYanitDto();
         mockResponse.setSulamaGerekli(true);
         mockResponse.setAnlikNem(new BigDecimal("25.0"));
-        when(vanaLogRepository.save(any(VanaLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        when(istasyonKontrolModuServisi.otonomModundaMi(testIstasyonId)).thenReturn(true);
 
         Istasyon testIstasyon = Istasyon.builder()
                 .id(testIstasyonId)
-                .enlem(38.4192)
-                .boylam(27.1287)
                 .tarlaKapasitesi(new BigDecimal("40.0"))
                 .build();
         when(istasyonRepository.findById(testIstasyonId)).thenReturn(Optional.of(testIstasyon));
@@ -56,26 +49,8 @@ public class OtonomVanaTetikleyiciTest {
         // When: Tetikleyici servis çalıştırılıyor
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, mockResponse);
 
-        // Then: Veri tabanı repository'sinin "save" metodu tam 1 kez çağrılmalı
-        ArgumentCaptor<VanaLog> vanaLogCaptor = ArgumentCaptor.forClass(VanaLog.class);
-        verify(vanaLogRepository, times(1)).save(vanaLogCaptor.capture());
-
-        VanaLog savedLog = vanaLogCaptor.getValue();
-        assertEquals(testIstasyonId, savedLog.getIstasyonId());
-        assertEquals(1, savedLog.getDurum());
-        assertEquals("OTONOM", savedLog.getTetiklemeTipi());
-        assertNotNull(savedLog.getTarih());
-
-        // Then: Enlem/boylam bilgileriyle zenginleştirilmiş yayın /topic/vana-loglari kanalına gönderilmeli
-        ArgumentCaptor<VanaLogYayinDto> yayinCaptor = ArgumentCaptor.forClass(VanaLogYayinDto.class);
-        verify(simpMessagingTemplate, times(1)).convertAndSend(eq("/topic/vana-loglari"), yayinCaptor.capture());
-
-        VanaLogYayinDto yayinlananVeri = yayinCaptor.getValue();
-        assertEquals(testIstasyonId, yayinlananVeri.getIstasyonId());
-        assertEquals(1, yayinlananVeri.getDurum());
-        assertEquals("OTONOM", yayinlananVeri.getTetiklemeTipi());
-        assertEquals(38.4192, yayinlananVeri.getEnlem());
-        assertEquals(27.1287, yayinlananVeri.getBoylam());
+        // Then: Vana logu 1 (AÇIK) durumuyla kaydedilip yayınlanmalı
+        verify(vanaLogYayinci, times(1)).kaydetVeYayinla(testIstasyonId, 1, "OTONOM");
     }
 
     @Test
@@ -84,14 +59,15 @@ public class OtonomVanaTetikleyiciTest {
         UUID testIstasyonId = UUID.randomUUID();
         KuralMotoruYanitDto mockResponse = new KuralMotoruYanitDto();
         mockResponse.setSulamaGerekli(false);
+
+        when(istasyonKontrolModuServisi.otonomModundaMi(testIstasyonId)).thenReturn(true);
         when(istasyonRepository.findById(testIstasyonId)).thenReturn(Optional.empty());
 
         // When: Tetikleyici servis çalıştırılıyor
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, mockResponse);
 
-        // Then: Durum değişmediği için hiçbir kayıt atılmamalı ve yayın yapılmamalı
-        verify(vanaLogRepository, never()).save(any(VanaLog.class));
-        verify(simpMessagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+        // Then: Durum değişmediği için hiçbir kayıt/yayın yapılmamalı
+        verify(vanaLogYayinci, never()).kaydetVeYayinla(any(), anyInt(), anyString());
     }
 
     @Test
@@ -101,7 +77,8 @@ public class OtonomVanaTetikleyiciTest {
         KuralMotoruYanitDto mockResponse = new KuralMotoruYanitDto();
         mockResponse.setSulamaGerekli(true);
         mockResponse.setAnlikNem(new BigDecimal("25.0"));
-        when(vanaLogRepository.save(any(VanaLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        when(istasyonKontrolModuServisi.otonomModundaMi(testIstasyonId)).thenReturn(true);
 
         Istasyon testIstasyon = Istasyon.builder()
                 .id(testIstasyonId)
@@ -116,8 +93,7 @@ public class OtonomVanaTetikleyiciTest {
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, mockResponse);
 
         // Then: Durum değişmediği için sadece ilk çağrıda kayıt/yayın yapılmalı, spam log oluşmamalı
-        verify(vanaLogRepository, times(1)).save(any(VanaLog.class));
-        verify(simpMessagingTemplate, times(1)).convertAndSend(anyString(), any(Object.class));
+        verify(vanaLogYayinci, times(1)).kaydetVeYayinla(any(), anyInt(), anyString());
     }
 
     @Test
@@ -125,10 +101,7 @@ public class OtonomVanaTetikleyiciTest {
         // Given: Vana zaten açık ve kural motoru hâlâ "sulama gerekli" diyor, ama toprak nemi tarla kapasitesine ulaştı
         UUID testIstasyonId = UUID.randomUUID();
 
-        KuralMotoruYanitDto acmaYaniti = new KuralMotoruYanitDto();
-        acmaYaniti.setSulamaGerekli(true);
-        acmaYaniti.setAnlikNem(new BigDecimal("25.0"));
-        when(vanaLogRepository.save(any(VanaLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(istasyonKontrolModuServisi.otonomModundaMi(testIstasyonId)).thenReturn(true);
 
         Istasyon testIstasyon = Istasyon.builder()
                 .id(testIstasyonId)
@@ -136,6 +109,9 @@ public class OtonomVanaTetikleyiciTest {
                 .build();
         when(istasyonRepository.findById(testIstasyonId)).thenReturn(Optional.of(testIstasyon));
 
+        KuralMotoruYanitDto acmaYaniti = new KuralMotoruYanitDto();
+        acmaYaniti.setSulamaGerekli(true);
+        acmaYaniti.setAnlikNem(new BigDecimal("25.0"));
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, acmaYaniti);
 
         KuralMotoruYanitDto doygunlukYaniti = new KuralMotoruYanitDto();
@@ -145,12 +121,26 @@ public class OtonomVanaTetikleyiciTest {
         // When: Toprak nemi tarla kapasitesine ulaştığında tekrar değerlendiriliyor
         otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, doygunlukYaniti);
 
-        // Then: Kural motorunun kararından bağımsız olarak vana otonom şekilde KAPALI konuma geçmeli
-        ArgumentCaptor<VanaLog> vanaLogCaptor = ArgumentCaptor.forClass(VanaLog.class);
-        verify(vanaLogRepository, times(2)).save(vanaLogCaptor.capture());
+        // Then: Kural motorunun kararından bağımsız olarak vana otonom şekilde KAPALI (0) konuma geçmeli
+        verify(vanaLogYayinci, times(1)).kaydetVeYayinla(testIstasyonId, 1, "OTONOM");
+        verify(vanaLogYayinci, times(1)).kaydetVeYayinla(testIstasyonId, 0, "OTONOM");
+    }
 
-        VanaLog sonKayit = vanaLogCaptor.getAllValues().get(1);
-        assertEquals(0, sonKayit.getDurum());
-        assertEquals("OTONOM", sonKayit.getTetiklemeTipi());
+    @Test
+    public void testTetikle_IstasyonManuelModdaysa_OtonomKararUygulanmamali() {
+        // Given: İstasyon kullanıcı tarafından MANUEL moda alınmış
+        UUID testIstasyonId = UUID.randomUUID();
+        KuralMotoruYanitDto mockResponse = new KuralMotoruYanitDto();
+        mockResponse.setSulamaGerekli(true);
+        mockResponse.setAnlikNem(new BigDecimal("25.0"));
+
+        when(istasyonKontrolModuServisi.otonomModundaMi(testIstasyonId)).thenReturn(false);
+
+        // When: Tetikleyici servis çalıştırılıyor
+        otonomVanaTetikleyici.kuralSonucunuUygula(testIstasyonId, mockResponse);
+
+        // Then: Otonom karar tamamen yok sayılmalı, istasyon repository'sine bile gidilmemeli
+        verify(vanaLogYayinci, never()).kaydetVeYayinla(any(), anyInt(), anyString());
+        verify(istasyonRepository, never()).findById(any());
     }
 }

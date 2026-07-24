@@ -1,18 +1,12 @@
 package com.example.backend.service;
 
 import com.example.backend.dto.KuralMotoruYanitDto;
-import com.example.backend.dto.VanaLogYayinDto;
 import com.example.backend.entity.Istasyon;
-import com.example.backend.entity.VanaLog;
 import com.example.backend.repository.IstasyonRepository;
-import com.example.backend.repository.VanaLogRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,6 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * zaten ACIK durumdayken toprak nemi tarla kapasitesine ulastiysa, kural
  * motorunun kararindan bagimsiz olarak vana otonom sekilde KAPALI konuma
  * gecirilir.
+ *
+ * Istasyon kullanici tarafindan MANUEL moda alinmissa, bu servis o istasyon
+ * icin devre disi kalir; karar verme yetkisi tamamen kullaniciya gecer.
  */
 @Service
 @RequiredArgsConstructor
@@ -36,16 +33,18 @@ public class OtonomVanaTetikleyici {
     private static final int VANA_ACIK = 1;
     private static final int VANA_KAPALI = 0;
     private static final String TETIKLEME_TIPI_OTONOM = "OTONOM";
-    private static final String VANA_LOG_KANALI = "/topic/vana-loglari";
 
-    private final VanaLogRepository vanaLogRepository;
     private final IstasyonRepository istasyonRepository;
-    private final SimpMessagingTemplate simpMessagingTemplate;
+    private final IstasyonKontrolModuServisi istasyonKontrolModuServisi;
+    private final VanaLogYayinci vanaLogYayinci;
 
     private final Map<String, Integer> sonVanaDurumlari = new ConcurrentHashMap<>();
 
-    @Transactional
     public void kuralSonucunuUygula(UUID istasyonId, KuralMotoruYanitDto kuralMotoruYaniti) {
+        if (!istasyonKontrolModuServisi.otonomModundaMi(istasyonId)) {
+            return;
+        }
+
         String istasyonAnahtari = istasyonId.toString();
         int mevcutDurum = sonVanaDurumlari.getOrDefault(istasyonAnahtari, VANA_KAPALI);
         int hedefDurum = kuralMotoruYaniti.isSulamaGerekli() ? VANA_ACIK : VANA_KAPALI;
@@ -60,17 +59,8 @@ public class OtonomVanaTetikleyici {
             return;
         }
 
-        VanaLog kaydedilenVanaLog = vanaLogRepository.save(
-                VanaLog.builder()
-                        .istasyonId(istasyonId)
-                        .durum(hedefDurum)
-                        .tetiklemeTipi(TETIKLEME_TIPI_OTONOM)
-                        .tarih(OffsetDateTime.now())
-                        .build());
-
+        vanaLogYayinci.kaydetVeYayinla(istasyonId, hedefDurum, TETIKLEME_TIPI_OTONOM);
         sonVanaDurumlari.put(istasyonAnahtari, hedefDurum);
-
-        simpMessagingTemplate.convertAndSend(VANA_LOG_KANALI, vanaLogYayinDtoUret(kaydedilenVanaLog, istasyon));
     }
 
     private boolean tarlaKapasitesineUlasildi(Istasyon istasyon, BigDecimal anlikNem) {
@@ -78,16 +68,5 @@ public class OtonomVanaTetikleyici {
             return false;
         }
         return anlikNem.compareTo(istasyon.getTarlaKapasitesi()) >= 0;
-    }
-
-    private VanaLogYayinDto vanaLogYayinDtoUret(VanaLog vanaLog, Istasyon istasyon) {
-        return VanaLogYayinDto.builder()
-                .istasyonId(vanaLog.getIstasyonId())
-                .durum(vanaLog.getDurum())
-                .tetiklemeTipi(vanaLog.getTetiklemeTipi())
-                .tarih(vanaLog.getTarih())
-                .enlem(istasyon != null ? istasyon.getEnlem() : null)
-                .boylam(istasyon != null ? istasyon.getBoylam() : null)
-                .build();
     }
 }

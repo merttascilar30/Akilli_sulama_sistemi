@@ -15,6 +15,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private static final String WS_ENDPOINT = "/ws";
     private static final String UYGULAMA_ICI_ONEKI = "/topic";
+    private static final String ISTEMCIDEN_SUNUCUYA_ONEKI = "/app";
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -26,5 +27,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.enableSimpleBroker(UYGULAMA_ICI_ONEKI);
+        registry.setApplicationDestinationPrefixes(ISTEMCIDEN_SUNUCUYA_ONEKI);
     }
 }

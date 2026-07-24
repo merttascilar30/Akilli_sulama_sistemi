@@ -79,6 +79,31 @@
             </div>
         </section>
 
+        <section class="grid grid-cols-1 gap-4">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div class="flex items-center space-x-3">
+                    <span class="text-2xl">🎛️</span>
+                    <div>
+                        <h2 class="text-sm font-semibold text-slate-200">Vana Kontrol Paneli</h2>
+                        <p id="kontrol-secili-istasyon" class="text-xs text-slate-500">Seçili İstasyon: —</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-6">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-slate-400">Otonom</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="mod-toggle" class="sr-only peer" disabled>
+                            <div class="w-11 h-6 bg-slate-600 rounded-full peer peer-checked:bg-amber-500 transition-colors peer-disabled:opacity-40 peer-disabled:cursor-not-allowed after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                        </label>
+                        <span class="text-sm text-slate-400">Manuel</span>
+                    </div>
+                    <button id="vana-kapat-btn" disabled class="bg-red-500/20 text-red-400 border border-red-500/30 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-500/30 transition">
+                        🚫 Vanayı Kapat
+                    </button>
+                </div>
+            </div>
+        </section>
+
         <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-md flex flex-col">
@@ -142,13 +167,45 @@
         let nemChart = null;
         const MAKS_GRAFIK_NOKTASI = 20;
 
-        // Seçili istasyonu değiştirir; farklı bir istasyona geçildiğinde grafiği sıfırlar
+        // Seçili istasyonu değiştirir; farklı bir istasyona geçildiğinde grafiği sıfırlar ve kontrol panelini günceller
         function seciliIstasyonuAyarla(yeniIstasyonId) {
             if (yeniIstasyonId === seciliIstasyonId) {
                 return;
             }
             seciliIstasyonId = yeniIstasyonId;
             nemGrafiginiSifirla();
+            kontrolPanelGuncelle();
+        }
+
+        // Vana Kontrol Paneli'ndeki toggle/buton durumlarını seçili istasyona göre günceller
+        function kontrolPanelGuncelle() {
+            const etiket = document.getElementById('kontrol-secili-istasyon');
+            const modToggle = document.getElementById('mod-toggle');
+            const vanaKapatBtn = document.getElementById('vana-kapat-btn');
+
+            if (seciliIstasyonId) {
+                etiket.innerText = `Seçili İstasyon: ${seciliIstasyonId.substring(0, 8)}...`;
+                modToggle.disabled = false;
+                vanaKapatBtn.disabled = false;
+            } else {
+                etiket.innerText = 'Seçili İstasyon: —';
+                modToggle.disabled = true;
+                vanaKapatBtn.disabled = true;
+            }
+
+            // Yeni istasyon seçildiğinde panel varsayılan olarak Otonom görünümüne dönsün
+            modToggle.checked = false;
+        }
+
+        // Seçili istasyon için backend'e manuel kontrol komutu gönderir (MANUEL, OTONOM veya KAPAT)
+        function manuelKontrolGonder(komut) {
+            if (!seciliIstasyonId || !stompClient) {
+                return;
+            }
+            stompClient.send('/app/manual-control', {}, JSON.stringify({
+                istasyonId: seciliIstasyonId,
+                komut: komut
+            }));
         }
 
         // Canlı Toprak Nemi Trendi grafiğini başlatan fonksiyon
@@ -372,6 +429,15 @@
             tableBody.insertBefore(newRow, tableBody.firstChild);
             if (tableBody.children.length > 8) tableBody.removeChild(tableBody.lastChild);
         }
+
+        document.getElementById('mod-toggle').addEventListener('change', function (e) {
+            manuelKontrolGonder(e.target.checked ? 'MANUEL' : 'OTONOM');
+        });
+
+        document.getElementById('vana-kapat-btn').addEventListener('click', function () {
+            manuelKontrolGonder('KAPAT');
+            document.getElementById('mod-toggle').checked = true;
+        });
 
         window.onload = function() {
             initMap(); // Önce haritayı yükle
