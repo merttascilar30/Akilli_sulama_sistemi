@@ -2,26 +2,30 @@ package com.example.backend.service;
 
 import com.example.backend.dto.KuralMotoruYanitDto;
 import com.example.backend.entity.Istasyon;
+import com.example.backend.entity.VanaLog;
 import com.example.backend.repository.IstasyonRepository;
+import com.example.backend.repository.VanaLogRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Kural motorundan gelen degerlendirme sonucuna gore vana_loglari tablosuna
  * otonom tetikleme kaydi giren servis.
  *
- * Her istasyonun son bilinen vana durumu thread-safe bir bellek ici harita
- * (sonVanaDurumlari) uzerinde tutulur. Veritabanina yazma ve WebSocket
- * yayini SADECE durum degisikliginde tetiklenir; boylece ayni kararin
- * her cagride tekrar tekrar loglanmasi (spam) engellenir. Ayrica vana
- * zaten ACIK durumdayken toprak nemi tarla kapasitesine ulastiysa, kural
- * motorunun kararindan bagimsiz olarak vana otonom sekilde KAPALI konuma
- * gecirilir.
+ * Istasyonun "su anki" vana durumu, yerel bir bellek ici onbellege degil,
+ * VanaLogRepository uzerinden o istasyon icin atilmis EN SON logun gercek
+ * durumuna bakilarak belirlenir. Boylece ManuelVanaKontrolServisi gibi baska
+ * bir servis araya MANUEL bir kapatma logu soktuğunda (State Cache
+ * Invalidation), bu servis eski/yanlis bir onbellek degerine gore karar
+ * vermez; her zaman veritabanindaki gercek son duruma gore hareket eder.
+ * Veritabanina yazma ve WebSocket yayini SADECE bu gercek durumla hedef
+ * durum farkli oldugunda tetiklenir; boylece ayni kararin her cagride
+ * tekrar tekrar loglanmasi (spam) engellenir. Ayrica vana zaten ACIK
+ * durumdayken toprak nemi tarla kapasitesine ulastiysa, kural motorunun
+ * kararindan bagimsiz olarak vana otonom sekilde KAPALI konuma gecirilir.
  *
  * Istasyon kullanici tarafindan MANUEL moda alinmissa, bu servis o istasyon
  * icin devre disi kalir; karar verme yetkisi tamamen kullaniciya gecer.
@@ -35,18 +39,16 @@ public class OtonomVanaTetikleyici {
     private static final String TETIKLEME_TIPI_OTONOM = "OTONOM";
 
     private final IstasyonRepository istasyonRepository;
+    private final VanaLogRepository vanaLogRepository;
     private final IstasyonKontrolModuServisi istasyonKontrolModuServisi;
     private final VanaLogYayinci vanaLogYayinci;
-
-    private final Map<String, Integer> sonVanaDurumlari = new ConcurrentHashMap<>();
 
     public void kuralSonucunuUygula(UUID istasyonId, KuralMotoruYanitDto kuralMotoruYaniti) {
         if (!istasyonKontrolModuServisi.otonomModundaMi(istasyonId)) {
             return;
         }
 
-        String istasyonAnahtari = istasyonId.toString();
-        int mevcutDurum = sonVanaDurumlari.getOrDefault(istasyonAnahtari, VANA_KAPALI);
+        int mevcutDurum = sonBilinenVanaDurumu(istasyonId);
         int hedefDurum = kuralMotoruYaniti.isSulamaGerekli() ? VANA_ACIK : VANA_KAPALI;
 
         Istasyon istasyon = istasyonRepository.findById(istasyonId).orElse(null);
@@ -60,7 +62,16 @@ public class OtonomVanaTetikleyici {
         }
 
         vanaLogYayinci.kaydetVeYayinla(istasyonId, hedefDurum, TETIKLEME_TIPI_OTONOM);
-        sonVanaDurumlari.put(istasyonAnahtari, hedefDurum);
+    }
+
+    /**
+     * Istasyonun gercek son vana durumunu vana_loglari tablosundaki EN SON
+     * kayittan okur. Hic log yoksa vana varsayilan olarak KAPALI kabul edilir.
+     */
+    private int sonBilinenVanaDurumu(UUID istasyonId) {
+        return vanaLogRepository.findTopByIstasyonIdOrderByIdDesc(istasyonId)
+                .map(VanaLog::getDurum)
+                .orElse(VANA_KAPALI);
     }
 
     private boolean tarlaKapasitesineUlasildi(Istasyon istasyon, BigDecimal anlikNem) {

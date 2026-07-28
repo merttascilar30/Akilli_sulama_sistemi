@@ -12,7 +12,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        /* Haritayı panelin karanlık temasına (Dark Mode) uyumlu hale getiren filtre */
         .dark-map .leaflet-layer,
         .dark-map .leaflet-control-zoom-in,
         .dark-map .leaflet-control-zoom-out,
@@ -23,6 +22,8 @@
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col space-y-3 pointer-events-none"></div>
 
     <header class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center shadow-lg">
         <div class="flex items-center space-x-3">
@@ -45,7 +46,7 @@
                 <div class="flex items-baseline space-x-1">
                     <span id="toprak-nemi" class="text-3xl font-extrabold text-emerald-400">--</span><span class="text-lg text-slate-400">%</span>
                 </div>
-                <p class="text-xs text-slate-500 mt-2">Hedef Nem Eşiği: ~%31.7</p>
+                <p class="text-xs text-emerald-500 font-semibold mt-2" id="hedef-nem-esigi">Hedef Nem Eşiği: Yükleniyor...</p>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md">
@@ -105,7 +106,6 @@
         </section>
 
         <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-md flex flex-col">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-lg font-bold text-slate-200 flex items-center space-x-2">
@@ -141,7 +141,6 @@
                     </table>
                 </div>
             </div>
-
         </section>
 
         <section class="grid grid-cols-1 gap-6">
@@ -162,22 +161,92 @@
     <script>
         let stompClient = null;
         let map = null;
-        let stationMarkers = {}; // YENİ: Çoklu istasyonları tutacak obje
-        let seciliIstasyonId = null; // Üstteki sensör kartlarının ve grafiğin hangi istasyona ait olduğunu belirler
+        let stationMarkers = {}; 
+        let seciliIstasyonId = null; 
         let nemChart = null;
         const MAKS_GRAFIK_NOKTASI = 20;
+        let alarmDurumlari = {}; 
+        let istasyonKatalogu = {}; // Kural motoru hesabı için hafıza
 
-        // Seçili istasyonu değiştirir; farklı bir istasyona geçildiğinde grafiği sıfırlar ve kontrol panelini günceller
-        function seciliIstasyonuAyarla(yeniIstasyonId) {
-            if (yeniIstasyonId === seciliIstasyonId) {
-                return;
+        function playAlarmSound() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+                
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1);
+                
+                gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+                
+                osc.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                
+                osc.start();
+                osc.stop(ctx.currentTime + 0.5);
+            } catch (e) {
+                console.log("Ses API etkileşim bekliyor.");
             }
+        }
+
+        function showToast(istasyonId, mesaj) {
+            const container = document.getElementById('toast-container');
+            const kisaId = istasyonId ? istasyonId.substring(0, 8) : 'Bilinmeyen';
+            
+            const toast = document.createElement('div');
+            toast.className = 'bg-red-600 border-l-4 border-red-900 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center space-x-4 transform transition-all duration-500 translate-x-full opacity-0 pointer-events-auto';
+            
+            toast.innerHTML = `
+                <span class="text-3xl animate-pulse">🚨</span>
+                <div>
+                    <h4 class="font-bold text-sm tracking-wide">KRİTİK UYARI (${kisaId}...)</h4>
+                    <p class="text-xs mt-1 text-red-100">${mesaj}</p>
+                </div>
+            `;
+            
+            container.appendChild(toast);
+            
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-x-full', 'opacity-0');
+                toast.classList.add('translate-x-0', 'opacity-100');
+            });
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-x-0', 'opacity-100');
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 500); 
+            }, 5000);
+        }
+
+        function esikDegeriniEkranaYaz(istasyonId) {
+            const istasyon = istasyonKatalogu[istasyonId];
+            if (istasyon) {
+                const kc = istasyon.bitkiKatsayisi || 0.85;
+                const tk = istasyon.tarlaKapasitesi || 40.0;
+                const sn = istasyon.solmaNoktasi || 20.0;
+                const et0 = 5.0; // Varsayılan
+
+                const etc = et0 * kc;
+                let k_dinamik = 0.50 + (0.02 * etc);
+                if (k_dinamik > 0.70) k_dinamik = 0.70;
+
+                const esik = sn + k_dinamik * (tk - sn);
+                document.getElementById('hedef-nem-esigi').innerText = `Hedef Nem Eşiği: ~%${esik.toFixed(1)}`;
+            } else {
+                document.getElementById('hedef-nem-esigi').innerText = `Hedef Nem Eşiği: Hesaplanıyor...`;
+            }
+        }
+
+        function seciliIstasyonuAyarla(yeniIstasyonId) {
+            if (yeniIstasyonId === seciliIstasyonId) return;
             seciliIstasyonId = yeniIstasyonId;
             nemGrafiginiSifirla();
             kontrolPanelGuncelle();
+            esikDegeriniEkranaYaz(yeniIstasyonId);
         }
 
-        // Vana Kontrol Paneli'ndeki toggle/buton durumlarını seçili istasyona göre günceller
         function kontrolPanelGuncelle() {
             const etiket = document.getElementById('kontrol-secili-istasyon');
             const modToggle = document.getElementById('mod-toggle');
@@ -192,23 +261,17 @@
                 modToggle.disabled = true;
                 vanaKapatBtn.disabled = true;
             }
-
-            // Yeni istasyon seçildiğinde panel varsayılan olarak Otonom görünümüne dönsün
             modToggle.checked = false;
         }
 
-        // Seçili istasyon için backend'e manuel kontrol komutu gönderir (MANUEL, OTONOM veya KAPAT)
         function manuelKontrolGonder(komut) {
-            if (!seciliIstasyonId || !stompClient) {
-                return;
-            }
+            if (!seciliIstasyonId || !stompClient) return;
             stompClient.send('/app/manual-control', {}, JSON.stringify({
                 istasyonId: seciliIstasyonId,
                 komut: komut
             }));
         }
 
-        // Canlı Toprak Nemi Trendi grafiğini başlatan fonksiyon
         function initNemGrafigi() {
             const ctx = document.getElementById('nemGrafigi').getContext('2d');
             nemChart = new Chart(ctx, {
@@ -247,22 +310,15 @@
             });
         }
 
-        // Seçili istasyon değiştiğinde grafiği baştan başlatır
         function nemGrafiginiSifirla() {
-            if (!nemChart) {
-                return;
-            }
+            if (!nemChart) return;
             nemChart.data.labels = [];
             nemChart.data.datasets[0].data = [];
             nemChart.update();
         }
 
-        // Grafiğe yeni bir nem verisi ekler; son 20 veri paketini tutup en eskisini kaydırarak siler
         function nemGrafiginiGuncelle(nem) {
-            if (!nemChart || nem === undefined || nem === null) {
-                return;
-            }
-
+            if (!nemChart || nem === undefined || nem === null) return;
             nemChart.data.labels.push(new Date().toLocaleTimeString());
             nemChart.data.datasets[0].data.push(parseFloat(nem));
 
@@ -270,78 +326,83 @@
                 nemChart.data.labels.shift();
                 nemChart.data.datasets[0].data.shift();
             }
-
             nemChart.update();
         }
 
-        // Harita Başlatma Fonksiyonu
-        function initMap() {
-            // Harita merkezini Adana'ya odakla
+        async function initMap() {
             map = L.map('map').setView([36.9850, 35.3250], 12);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap',
                 maxZoom: 18
             }).addTo(map);
-            
-            // Not: Başlangıç pini buradan silindi. Artık veriler geldikçe pinler dinamik oluşacak.
+
+            try {
+                const response = await fetch('http://localhost:8081/api/istasyonlar');
+                if (response.ok) {
+                    const istasyonlar = await response.json();
+                    
+                    istasyonlar.forEach(istasyon => {
+                        istasyonKatalogu[istasyon.id] = istasyon; 
+                        
+                        // Sadece geçerli koordinatı olanları (null olmayanları) ekle
+                        if (istasyon.enlem && istasyon.boylam) {
+                            if (!stationMarkers[istasyon.id]) {
+                                let marker = L.circleMarker([istasyon.enlem, istasyon.boylam], {
+                                    radius: 14,
+                                    fillColor: "#3b82f6", 
+                                    color: "#ffffff",
+                                    weight: 2,
+                                    opacity: 1,
+                                    fillOpacity: 0.8
+                                }).addTo(map);
+
+                                marker.bindPopup(`<b>İstasyon ID: ${istasyon.id.substring(0,8)}...</b><br/>Durum: Bekleniyor...`);
+                                
+                                marker.on('click', function () {
+                                    seciliIstasyonuAyarla(istasyon.id);
+                                });
+
+                                marker.sonVanaDurumu = 0;
+                                stationMarkers[istasyon.id] = marker;
+
+                                if (seciliIstasyonId === null) {
+                                    seciliIstasyonuAyarla(istasyon.id);
+                                }
+                            }
+                        }
+                    });
+                    
+                    if (seciliIstasyonId) {
+                        esikDegeriniEkranaYaz(seciliIstasyonId);
+                    }
+                }
+            } catch (error) {
+                console.error("Sayfa açılışında istasyonlar çekilemedi:", error);
+            }
         }
 
-        // YENİ: Haritadaki İstasyon Rengini ve Bilgisini Güncelleyen (veya Yeni Ekleyen) Fonksiyon
         function addOrUpdateMarker(istasyonId, enlem, boylam, vanaDurumu, nem) {
-            if (!stationMarkers[istasyonId]) {
-                // İstasyon haritada YOKSA, yeni bir pin (nokta) oluştur
-                let pinColor = (vanaDurumu === 1) ? "#10b981" : "#3b82f6"; 
-                
-                let yeniMarker = L.circleMarker([enlem, boylam], {
-                    radius: 14,
-                    fillColor: pinColor,
-                    color: "#ffffff",
-                    weight: 2,
-                    opacity: 1,
-                    fillOpacity: 0.8
-                }).addTo(map);
-
-                yeniMarker.bindPopup(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: Başlatılıyor...`);
-
-                // Pine tıklandığında üstteki sensör kartları ve grafik bu istasyona odaklansın
-                yeniMarker.on('click', function () {
-                    seciliIstasyonuAyarla(istasyonId);
-                });
-
-                // Sayfa ilk açıldığında bağlanan ilk istasyon otomatik seçili gelsin
-                if (seciliIstasyonId === null) {
-                    seciliIstasyonuAyarla(istasyonId);
-                }
-
-                // Popup metnini canlı nem verisiyle güncelleyebilmek için son vana durumunu pin üzerinde tutuyoruz
-                yeniMarker.sonVanaDurumu = vanaDurumu;
-
-                // Objeye kaydet
-                stationMarkers[istasyonId] = yeniMarker;
-            } else {
-                // İstasyon ZATEN VARSA, sadece rengini ve içeriğini güncelle
-                let mevcutMarker = stationMarkers[istasyonId];
+            let mevcutMarker = stationMarkers[istasyonId];
+            
+            if (mevcutMarker) {
                 mevcutMarker.sonVanaDurumu = vanaDurumu;
 
                 if (vanaDurumu === 1) {
                     mevcutMarker.setStyle({ fillColor: "#10b981" });
-                    mevcutMarker.setPopupContent(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: 🟢 SULANIYOR<br/>Son Nem: %${nem}`);
+                    mevcutMarker.setPopupContent(`<b>İstasyon ID: ${istasyonId.substring(0,8)}...</b><br/>Durum: 🟢 SULANIYOR<br/>Son Nem: %${nem}`);
                 } else {
                     mevcutMarker.setStyle({ fillColor: "#3b82f6" });
-                    mevcutMarker.setPopupContent(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: 🔵 BEKLEMEDE<br/>Son Nem: %${nem}`);
+                    mevcutMarker.setPopupContent(`<b>İstasyon ID: ${istasyonId.substring(0,8)}...</b><br/>Durum: 🔵 BEKLEMEDE<br/>Son Nem: %${nem}`);
                 }
             }
         }
 
-        // YENİ: Canlı metrik geldiğinde ilgili pinin popup'ındaki "Son Nem" yazısını güncelleyen fonksiyon
         function updateMarkerNemPopup(istasyonId, nem) {
             const marker = stationMarkers[istasyonId];
-            if (!marker || nem === undefined || nem === null) {
-                return;
-            }
+            if (!marker || nem === undefined || nem === null) return;
 
             const durumMetni = marker.sonVanaDurumu === 1 ? '🟢 SULANIYOR' : '🔵 BEKLEMEDE';
-            marker.setPopupContent(`<b>İstasyon ID: ${istasyonId}</b><br/>Durum: ${durumMetni}<br/>Son Nem: %${parseFloat(nem).toFixed(1)}`);
+            marker.setPopupContent(`<b>İstasyon ID: ${istasyonId.substring(0,8)}...</b><br/>Durum: ${durumMetni}<br/>Son Nem: %${parseFloat(nem).toFixed(1)}`);
         }
 
         function connectWebSocket() {
@@ -360,7 +421,6 @@
                     const metrik = JSON.parse(message.body);
                     const gelenNem = metrik.nem !== undefined ? metrik.nem : metrik.toprakNemi;
 
-                    // Sayfa ilk açıldığında bağlanan ilk istasyon otomatik seçili gelsin
                     if (seciliIstasyonId === null) {
                         seciliIstasyonuAyarla(metrik.istasyonId);
                     }
@@ -371,17 +431,29 @@
                         nemGrafiginiGuncelle(gelenNem);
                     }
 
-                    // Pin'in popup'ındaki "Son Nem" bilgisi vana durumundan bağımsız olarak her canlı veride tazelenir
                     updateMarkerNemPopup(metrik.istasyonId, gelenNem);
+
+                    // DINAMIK ALARM KONTROLU:
+                    // Sabit 20.0 yerine o tarlanın veritabanındaki kendi Solma Noktası (solmaNoktasi) alınıyor
+                    const istasyon = istasyonKatalogu[metrik.istasyonId];
+                    const solmaNoktasi = (istasyon && istasyon.solmaNoktasi) ? parseFloat(istasyon.solmaNoktasi) : 20.0;
+
+                    if (gelenNem < solmaNoktasi) {
+                        if (!alarmDurumlari[metrik.istasyonId]) {
+                            alarmDurumlari[metrik.istasyonId] = true; 
+                            playAlarmSound();
+                            showToast(metrik.istasyonId, `Toprak nemi solma noktasının altına düştü (%${parseFloat(gelenNem).toFixed(1)} < %${solmaNoktasi}). Kritik durum!`);
+                        }
+                    } else if (gelenNem >= (solmaNoktasi + 2.0)) {
+                        // Nem güvenli seviyeye çıkınca alarm kilidini aç (Histerezis)
+                        alarmDurumlari[metrik.istasyonId] = false;
+                    }
                 });
 
                 stompClient.subscribe('/topic/vana-loglari', function (message) {
                     const vanaLog = JSON.parse(message.body);
                     addVanaLogRow(vanaLog);
                     
-                    // YENİ DEĞİŞİKLİK: Vana kararı gelince haritadaki pini dinamik fonksiyona yolla.
-                    // Eğer Backend'den koordinat gelmiyorsa (şimdilik) varsayılan Adana koordinatını ve 'istasyon-1' id'sini atıyoruz.
-                    // İleride backend'den vanaLog.enlem ve vanaLog.boylam verileri geldikçe buralar otomatik dolacak.
                     let lat = vanaLog.enlem || 36.9850;
                     let lng = vanaLog.boylam || 35.3250;
                     let id = vanaLog.istasyon_id || vanaLog.istasyonId || 'istasyon-1';
@@ -431,7 +503,13 @@
         }
 
         document.getElementById('mod-toggle').addEventListener('change', function (e) {
-            manuelKontrolGonder(e.target.checked ? 'MANUEL' : 'OTONOM');
+            if (e.target.checked) {
+                // Şalter Manuele çekildiği an, sistemi "Güvenli Duruma" (Safe State) al.
+                // Hem Java'ya hem Python'a anında KAPAT emri gider ve %100 senkronize olurlar.
+                manuelKontrolGonder('KAPAT');
+            } else {
+                manuelKontrolGonder('OTONOM');
+            }
         });
 
         document.getElementById('vana-kapat-btn').addEventListener('click', function () {
@@ -439,10 +517,10 @@
             document.getElementById('mod-toggle').checked = true;
         });
 
-        window.onload = function() {
-            initMap(); // Önce haritayı yükle
-            initNemGrafigi(); // Nem trend grafiğini hazırla
-            connectWebSocket(); // Sonra canlı veriyi bağla
+        window.onload = async function() {
+            await initMap(); 
+            initNemGrafigi(); 
+            connectWebSocket(); 
         };
     </script>
 </body>

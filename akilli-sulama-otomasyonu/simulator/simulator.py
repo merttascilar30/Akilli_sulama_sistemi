@@ -6,139 +6,147 @@ import requests
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 SERVER_URL = "http://localhost:8081/api/metrics/async"
+STATIONS_URL = "http://localhost:8081/api/istasyonlar"
 KONTROL_DINLEYICI_PORT = 5001
-
-# Veritabanında (pgAdmin) kayıtlı olacak istasyon ID'lerini liste yapıyoruz
-STATIONS = [
-    "11111111-1111-1111-1111-111111111111", # 1. İstasyon (Adana Merkez)
-    "22222222-2222-2222-2222-222222222222"  # 2. İstasyon (Kampüs)
-    # Kendi UUID'ni de (2d28ec28...) buraya ekleyebilirsin
-]
 
 MOD_OTONOM = "OTONOM"
 MOD_MANUEL = "MANUEL"
 
-# Her istasyonun GÜNCEL NEM, VANA DURUMU ve KONTROL MODUNU ayrı ayrı tutacak sözlük
 station_states = {}
 state_lock = threading.Lock()
 
-# Başlangıçta her istasyona rastgele mantıksal başlangıç değerleri atıyoruz
-for sid in STATIONS:
-    station_states[sid] = {
-        "moisture": round(random.uniform(32.0, 38.0), 1),
-        "is_watering": False,
-        "mod": MOD_OTONOM
-    }
+# Tarımsal Eşik Hesaplama Formülü (Kural Motoru ile Birebir Aynı)
+def calculate_threshold(tk, sn, kc):
+    et0 = 5.0
+    etc = et0 * kc
+    k_dinamik = 0.50 + (0.02 * etc)
+    if k_dinamik > 0.70:
+        k_dinamik = 0.70
+    return sn + k_dinamik * (tk - sn)
 
-def generate_sensor_data(sid):
-    # İlgili istasyonun mevcut durumunu sözlükten çek
-    with state_lock:
-        state = station_states[sid]
-
-        if state["is_watering"]:
-            # Vana AÇIK: Toprak sulanıyor, nem sakince yükseliyor
-            state["moisture"] += round(random.uniform(0.5, 1.0), 1)
-            if state["moisture"] >= 40.0: # Tarla Kapasitesi sınırı
-                state["moisture"] = 40.0
-                state["is_watering"] = False
-        else:
-            # Vana KAPALI: Toprak sakince kuruyor
-            state["moisture"] -= round(random.uniform(0.3, 0.6), 1)
-            # İstasyon MANUEL moddaysa backend/kullanıcı karar verene kadar vana kendiliğinden açılmaz
-            if state["mod"] == MOD_OTONOM and state["moisture"] <= 30.5: # Dinamik eşik (~31.7%) altı
-                state["is_watering"] = True
-
-        # Sadece o istasyona ait sensör paketi
-        payload = {
-            "istasyonId": sid,
-            "nem": round(state["moisture"], 1),
-            "sicaklik": round(random.uniform(28.0, 31.0), 1),
-            "havaNemi": round(random.uniform(55.0, 62.0), 1),
-            "suSeviyesi": round(random.uniform(88.0, 92.0), 1)
-        }
-    return payload
-
-def kontrol_komutunu_uygula(istasyon_id, komut):
-    """Backend'den gelen manuel/otonom veya vana kapatma komutunu ilgili istasyona uygular."""
-    with state_lock:
-        state = station_states.get(istasyon_id)
-        if state is None:
-            return False
-
-        if komut == MOD_OTONOM:
-            state["mod"] = MOD_OTONOM
-        else:
-            # MANUEL veya KAPAT komutu: vana zorla kapatılır ve toprak kuruma döngüsüne alınır
-            state["mod"] = MOD_MANUEL
-            state["is_watering"] = False
-
-        return True
-
+# 15. GÜN: Spring Boot'tan Gelen Manuel Kontrol İsteklerini Karşılayan HTTP Handler
 class KontrolIstegiHandler(BaseHTTPRequestHandler):
-    """Backend'den gelen manuel kontrol komutlarını dinleyen basit HTTP handler'ı."""
-
     def do_POST(self):
-        if self.path != "/api/control":
+        if self.path == '/api/control':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            
+            try:
+                body = json.loads(post_data.decode('utf-8'))
+                istasyon_id = body.get('istasyonId')
+                komut = body.get('komut')
+                
+                with state_lock:
+                    if istasyon_id in station_states:
+                        if komut == 'KAPAT':
+                            station_states[istasyon_id]['valve'] = 0
+                            station_states[istasyon_id]['mode'] = MOD_MANUEL
+                            print(f"\n[⚠️ MANUEL KONTROL] {istasyon_id[:8]}... Vanası ARAYÜZDEN KAPATILDI!\n")
+                        elif komut == 'MANUEL':
+                            station_states[istasyon_id]['mode'] = MOD_MANUEL
+                        elif komut == 'OTONOM':
+                            station_states[istasyon_id]['mode'] = MOD_OTONOM
+                            print(f"\n[🤖 MOD DEĞİŞİMİ] {istasyon_id[:8]}... OTONOM Moda Alındı.\n")
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "SUCCESS"}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+        else:
             self.send_response(404)
-            self.end_headers()
-            return
-
-        icerik_uzunlugu = int(self.headers.get("Content-Length", 0))
-        istek_govdesi = self.rfile.read(icerik_uzunlugu) if icerik_uzunlugu > 0 else b"{}"
-
-        try:
-            veri = json.loads(istek_govdesi)
-            istasyon_id = veri.get("istasyonId")
-            komut = (veri.get("komut") or "").upper()
-
-            basarili = kontrol_komutunu_uygula(istasyon_id, komut)
-
-            self.send_response(200 if basarili else 404)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"basarili": basarili}).encode("utf-8"))
-
-            if basarili:
-                print(f"[>] Kontrol komutu uygulandı: [ID: {istasyon_id[:8]}...] Komut: {komut}")
-        except (ValueError, TypeError):
-            self.send_response(400)
             self.end_headers()
 
     def log_message(self, format, *args):
-        # Varsayılan erişim loglarını susturuyoruz, sadece kendi print çıktılarımızı görürüz
         pass
 
 def kontrol_dinleyicisini_baslat():
     sunucu = HTTPServer(("0.0.0.0", KONTROL_DINLEYICI_PORT), KontrolIstegiHandler)
-    print(f"[*] Manuel kontrol dinleyicisi http://localhost:{KONTROL_DINLEYICI_PORT}/api/control adresinde başlatıldı.")
+    print(f"[*] 15. Gün Manuel Kontrol Dinleyicisi http://localhost:{KONTROL_DINLEYICI_PORT}/api/control adresinde aktif.")
     sunucu.serve_forever()
 
-def main():
-    print("[*] Çoklu İstasyon Mantıksal Simülatörü Başlatıldı.")
-    print(f"[*] Veriler {SERVER_URL} adresine gönderiliyor...\n")
+def istasyon_simulasyonu(station):
+    sid = station.get("id")
+    tk = float(station.get("tarlaKapasitesi") or 40.0)
+    sn = float(station.get("solmaNoktasi") or 20.0)
+    kc = float(station.get("bitkiKatsayisi") or 0.85)
 
-    threading.Thread(target=kontrol_dinleyicisini_baslat, daemon=True).start()
+    esik = calculate_threshold(tk, sn, kc)
+
+    with state_lock:
+        station_states[sid] = {
+            "moisture": round(tk - random.uniform(1.0, 3.0), 1),
+            "valve": 0,
+            "mode": MOD_OTONOM,
+            "tk": tk,
+            "sn": sn,
+            "esik": esik
+        }
+
+    print(f"[+] {sid[:8]}... Başlatıldı | TK: %{tk} | Solma Noktası: %{sn} | Dinamik Eşik: ~%{esik:.1f}")
 
     headers = {'Content-Type': 'application/json'}
-    
+
     while True:
-        try:
-            # Döngü ile sırayla her istasyon için veri üret ve gönder
-            for sid in STATIONS:
-                data = generate_sensor_data(sid)
-                response = requests.post(SERVER_URL, data=json.dumps(data), headers=headers)
-                
-                if response.status_code in (200, 201, 202):
-                    print(f"[+] [ID: {sid[:8]}...] Nem: %{data['nem']} | Sıc: {data['sicaklik']}°C")
+        with state_lock:
+            st = station_states[sid]
+            
+            # OTONOM MODDA KURUMA VE SULANMA DÖNGÜSÜ
+            if st["mode"] == MOD_OTONOM:
+                if st["valve"] == 0:
+                    st["moisture"] -= round(random.uniform(0.2, 0.4), 1)
+                    if st["moisture"] <= (st["esik"] - 0.5):
+                        st["valve"] = 1
                 else:
-                    print(f"[-] HATA: Sunucu Yanıtı {response.status_code} (ID: {sid[:8]}...)")
-            
-            print("-" * 50)
-            time.sleep(1.0)
-            
-        except Exception as e:
-            print(f"[!] Bağlantı Hatası: Backend sunucusuna erişilemiyor ({e})")
-            time.sleep(2)
+                    st["moisture"] += round(random.uniform(0.5, 0.9), 1)
+                    if st["moisture"] >= st["tk"]:
+                        st["moisture"] = st["tk"]
+                        st["valve"] = 0
+            else:
+                # MANUEL MODDA VANA KAPALIYSA KURUMAYA DEVAM ET
+                if st["valve"] == 0:
+                    st["moisture"] -= round(random.uniform(0.1, 0.3), 1)
+                    if st["moisture"] < 10.0:
+                        st["moisture"] = 10.0
+
+            current_m = round(st["moisture"], 1)
+
+        data = {
+            "istasyonId": sid,
+            "nem": current_m,
+            "sicaklik": round(random.uniform(25.0, 34.0), 1),
+            "havaNemi": round(random.uniform(45.0, 65.0), 1),
+            "suSeviyesi": round(random.uniform(80.0, 95.0), 1)
+        }
+
+        try:
+            requests.post(SERVER_URL, data=json.dumps(data), headers=headers, timeout=2)
+        except Exception:
+            pass
+
+        time.sleep(1.0)
+
+def main():
+    print("[*] Dinamik Çoklu İstasyon & Manuel Kontrol Destekli Simülatör Başlatılıyor...\n")
+    
+    # 15. Gün HTTP Dinleyicisini Arka Plan Thread'inde Başlat
+    threading.Thread(target=kontrol_dinleyicisini_baslat, daemon=True).start()
+
+    try:
+        response = requests.get(STATIONS_URL, timeout=5)
+        if response.status_code == 200:
+            stations = response.json()
+            for st in stations:
+                threading.Thread(target=istasyon_simulasyonu, args=(st,), daemon=True).start()
+        else:
+            print("[-] İstasyonlar çekilemedi, varsayılan istasyonlar başlatılıyor...")
+    except Exception as e:
+        print(f"[-] Backend bağlantı hatası: {e}")
+
+    while True:
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()

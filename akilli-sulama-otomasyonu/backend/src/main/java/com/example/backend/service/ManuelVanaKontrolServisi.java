@@ -34,12 +34,13 @@ public class ManuelVanaKontrolServisi {
             return;
         }
 
-        // MANUEL veya KAPAT komutlari, otonom kural motorunu bu istasyon icin devre disi birakir
+        // MANUEL veya KAPAT komutlari, otonom kural motorunu bu istasyon icin devre disi birakir.
+        // "Safe State" prensibi: mod ne olursa olsun (MANUEL veya KAPAT), taşma/durum
+        // uyuşmazlığı riskini ortadan kaldırmak için vana simulator.py uzerinde fiilen
+        // ve daima KAPAT komutuyla kapatılır. Boylece Java'nın veri tabanına ve WebSocket'e
+        // yazdigi VANA_KAPALI durumu, simulator'daki gercek vana durumuyla her zaman tutarli olur.
         istasyonKontrolModuServisi.modAyarla(istasyonId, IstasyonKontrolModuServisi.MOD_MANUEL);
-        simulatorKontrolClient.komutGonder(istek.getIstasyonId(), komut);
-
-        if (KOMUT_KAPAT.equals(komut) || IstasyonKontrolModuServisi.MOD_MANUEL.equals(komut)) {
-            vanaLogYayinci.kaydetVeYayinla(istasyonId, VANA_KAPALI, TETIKLEME_TIPI_MANUEL);
-        }
+        simulatorKontrolClient.komutGonder(istek.getIstasyonId(), KOMUT_KAPAT);
+        vanaLogYayinci.kaydetVeYayinla(istasyonId, VANA_KAPALI, TETIKLEME_TIPI_MANUEL);
     }
 }
